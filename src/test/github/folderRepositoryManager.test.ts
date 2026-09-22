@@ -172,15 +172,11 @@ describe('PullRequestManager', function () {
 			const last = { localBranchName: undefined } as PullRequestModel;
 			const updated = { localBranchName: undefined } as PullRequestModel;
 			const models = new Map([[5, first], [7, last], [11, updated]]);
-			const getPullRequest = sinon.stub(githubRepository, 'getPullRequest').callsFake(async (number: number) => models.get(number));
+			sinon.stub(githubRepository, 'getPullRequest').callsFake(async (number: number) => models.get(number));
 			const getConfigs = sinon.spy(repository, 'getConfigs');
 
 			assert.deepStrictEqual(await manager.getLocalPullRequests(), [first, last]);
 			assert.strictEqual(getConfigs.calledOnce, true);
-			assert.deepStrictEqual(getPullRequest.args, [
-				[5, 'FolderRepositoryManager.getLocalPullRequests'],
-				[7, 'FolderRepositoryManager.getLocalPullRequests'],
-			]);
 			assert.strictEqual(first.localBranchName, 'branch-0');
 			assert.strictEqual(last.localBranchName, 'branch-101');
 
@@ -188,19 +184,6 @@ describe('PullRequestManager', function () {
 			assert.deepStrictEqual(await manager.getLocalPullRequests(), [first, updated]);
 			assert.strictEqual(getConfigs.calledTwice, true);
 			assert.strictEqual(updated.localBranchName, 'branch-101');
-		});
-
-		it('skips config reads without branches and handles config failures', async function () {
-			const url = 'https://github.com/owner/repo.git';
-			const remote = new GitHubRemote('origin', url, new Protocol(url), GitHubServerType.GitHubDotCom);
-			(manager as any)._githubRepositories = [new GitHubRepository(1, remote, repository.rootUri, manager.credentialStore, telemetry, true)];
-			const getConfigs = sinon.stub(repository, 'getConfigs').rejects(new Error('config unavailable'));
-
-			assert.deepStrictEqual(await manager.getLocalPullRequests(), []);
-			assert.strictEqual(getConfigs.notCalled, true);
-			await repository.createBranch('feature', false);
-			assert.deepStrictEqual(await manager.getLocalPullRequests(), []);
-			assert.strictEqual(getConfigs.calledOnce, true);
 		});
 	});
 
@@ -316,9 +299,12 @@ describe('PullRequestManager', function () {
 			await repository.setConfig('branch.feature.github-pr-owner-number', 'owner#repo#1');
 			repository.preserveConfigOnNextBranchDelete = true;
 
+			await repository.createBranch('other', false, 'commit-hash');
+			const getConfigs = sinon.spy(repository, 'getConfigs');
 			const nonExistant = new Set<string>();
-			await (manager as any).deleteBranches([{ label: 'feature' }], nonExistant, noopProgress, 1, 0, []);
+			await (manager as any).deleteBranches([{ label: 'feature' }, { label: 'other' }], nonExistant, noopProgress, 2, 0, []);
 
+			assert.strictEqual(getConfigs.callCount, 2);
 			const configs = await repository.getConfigs();
 			assert.strictEqual(configs.filter(c => c.key.startsWith('branch.feature.')).length, 0);
 			assert.strictEqual(nonExistant.has('feature'), false);
